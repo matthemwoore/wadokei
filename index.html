@@ -13,47 +13,20 @@
       align-items: center;
       justify-content: center;
       background-color: black;
-      transition: background-color 0.5s;
+      transition: background-color 0.5s ease;
     }
 
     .clock {
       position: relative;
-      width: 90%;
-      aspect-ratio: 3 / 2;
-      border: 4px solid currentColor;
-      border-radius: 1rem;
+      width: 95vw;
+      height: 60vh;
+      border: 6px solid currentColor;
+      border-radius: 1.5rem;
+      color: white;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: white;
-    }
-
-    .hand {
-      position: absolute;
-      bottom: 50%;
-      left: 50%;
-      transform-origin: bottom center;
-      transform: translateX(-50%) rotate(0deg);
-      background-color: currentColor;
-      border-radius: 2px;
-    }
-
-    .hour-hand {
-      width: 4px;
-      height: 25%;
-    }
-
-    .minute-hand {
-      width: 2px;
-      height: 40%;
-    }
-
-    .center {
-      position: absolute;
-      width: 10px;
-      height: 10px;
-      background-color: currentColor;
-      border-radius: 50%;
+      overflow: hidden;
     }
 
     .numbers {
@@ -61,18 +34,46 @@
       width: 100%;
       height: 100%;
       font-family: sans-serif;
-      font-weight: bold;
-      font-size: 1.5rem;
+      font-weight: 600;
+      font-size: 2.5vw;
     }
 
     .number {
       position: absolute;
       transform: translate(-50%, -50%);
     }
+
+    .hand {
+      position: absolute;
+      bottom: 50%;
+      left: 50%;
+      transform-origin: bottom center;
+      background-color: currentColor;
+      border-radius: 3px;
+      transform: translateX(-50%) rotate(0deg);
+    }
+
+    .hour-hand {
+      width: 0.7vw;
+      height: 25%;
+    }
+
+    .minute-hand {
+      width: 0.4vw;
+      height: 40%;
+    }
+
+    .center {
+      position: absolute;
+      width: 1.2vw;
+      height: 1.2vw;
+      background-color: currentColor;
+      border-radius: 50%;
+    }
   </style>
 </head>
 <body>
-  <div class="clock" id="clock">
+  <div class="clock">
     <div class="numbers" id="numbers"></div>
     <div class="hand hour-hand" id="hour-hand"></div>
     <div class="hand minute-hand" id="minute-hand"></div>
@@ -95,6 +96,7 @@
     function updateClock(sunrise, sunset) {
       const now = new Date();
       const isDay = now >= sunrise && now < sunset;
+
       document.body.style.backgroundColor = isDay ? 'white' : 'black';
       document.querySelector('.clock').style.color = isDay ? 'black' : 'white';
 
@@ -105,17 +107,19 @@
       const hourDeg = (hours + minutes / 60) * 30;
       const minuteDeg = (minutes + seconds / 60) * 6;
 
-      document.getElementById('hour-hand').style.transform = `translateX(-50%) rotate(${hourDeg}deg)`;
-      document.getElementById('minute-hand').style.transform = `translateX(-50%) rotate(${minuteDeg}deg)`;
+      document.getElementById('hour-hand').style.transform =
+        `translateX(-50%) rotate(${hourDeg}deg)`;
+      document.getElementById('minute-hand').style.transform =
+        `translateX(-50%) rotate(${minuteDeg}deg)`;
     }
 
     function createNumbers() {
       const container = document.getElementById('numbers');
+      const radius = 42; // percent distance from center
       for (let i = 1; i <= 12; i++) {
         const div = document.createElement('div');
         div.className = 'number';
         const angle = (i / 12) * 2 * Math.PI;
-        const radius = 40;
         div.style.left = `${50 + radius * Math.sin(angle)}%`;
         div.style.top = `${50 - radius * Math.cos(angle)}%`;
         div.textContent = i;
@@ -133,3 +137,4 @@
   </script>
 </body>
 </html>
+
