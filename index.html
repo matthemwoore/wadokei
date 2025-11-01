@@ -1,146 +1,139 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Wadokei 24h — Port Angeles</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Wadokei — Rectangular 24h (Port Angeles)</title>
 
-  <!-- Noto Serif JP -->
+  <!-- Japanese-feel font -->
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&display=swap" rel="stylesheet">
 
   <style>
-    :root{
-      --bg-night: #000;
-      --bg-day:  #fff;
+    :root {
+      --black: #000;
+      --white: #fff;
     }
 
-    html,body{
-      height:100%;
-      margin:0;
-      padding:0;
-      background: var(--bg-night);
-      color: var(--bg-day);
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: var(--black);
+      color: var(--white);
       font-family: "Noto Serif JP", serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
-    /* Full-screen container */
+    /* Full-screen frame */
     .frame {
-      width:100vw;
-      height:100vh;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      -webkit-font-smoothing:antialiased;
-      -moz-osx-font-smoothing:grayscale;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
-    /* SVG sits edge-to-edge but keeps some internal margin so numbers aren't clipped */
+    /* SVG occupies entire container */
     svg {
-      width:100%;
-      height:100%;
-      display:block;
-    }
-
-    /* For small screens prefer slightly thicker stroke */
-    .rim { stroke: currentColor; stroke-width: 6; fill: none; }
-    .hand {
-      stroke: currentColor;
-      stroke-linecap: round;
-      stroke-width: 12;
-    }
-
-    .center-dot {
-      fill: currentColor;
-      stroke: none;
+      width: 100%;
+      height: 100%;
+      display: block;
     }
 
     .number {
-      font-size: 2.8vh;
-      dominant-baseline: middle;
+      font-size: 3.2vh;     /* scales to screen height */
+      font-weight: 700;
       text-anchor: middle;
-      font-weight: 600;
+      dominant-baseline: middle;
       pointer-events: none;
     }
 
-    /* ensure crisp B/W rendering */
-    .day-fill { fill: var(--bg-day); }
-    .night-fill { fill: var(--bg-night); }
+    .hand {
+      stroke-width: 6;      /* thin line; adjust if needed for readability */
+      stroke-linecap: butt;
+      stroke: currentColor;
+    }
 
+    /* We'll let fill/stroke be set by attributes; keep CSS minimal */
   </style>
 </head>
 <body>
   <div class="frame">
-    <!-- SVG coordinate system: wide rectangle to match TRMNL orientation -->
-    <svg id="clockSVG" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" aria-label="Wadokei 24-hour clock">
-      <!-- black background (night) full circle -->
-      <rect x="0" y="0" width="1000" height="600" fill="black"></rect>
+    <!-- viewBox is tall-ish rectangle to suit TRMNL vertical display; numbers will stretch to ellipse -->
+    <svg id="svg" viewBox="0 0 1000 1600" preserveAspectRatio="xMidYMid meet" aria-label="Rectangular Wadokei 24-hour clock">
+      <!-- background black -->
+      <rect x="0" y="0" width="1000" height="1600" fill="black"></rect>
 
-      <!-- center for circle -->
-      <!-- We'll draw a full black ring then overlay a white sector for daylight -->
+      <!-- clip path (rectangle) - polygon wedge will be clipped to this rect -->
+      <defs>
+        <clipPath id="rectClip">
+          <rect x="0" y="0" width="1000" height="1600" />
+        </clipPath>
+      </defs>
 
-      <!-- Ring background (night) as a circle -->
-      <g id="clockGroup" transform="translate(500,300)">
-        <!-- Outer rim (in currentColor for contrast stroke around outer) -->
-        <circle r="260" class="rim" fill="none" />
-
-        <!-- Night base ring: draw as full disc black (already rect behind) but keep a ring visual -->
-        <circle r="240" fill="black" />
-
-        <!-- Daylight arc will be injected here as a white filled path -->
-        <g id="dayGroup"></g>
-
-        <!-- Outer rim stroke -->
-        <circle r="260" fill="none" class="rim" />
-
-        <!-- Hour hand (rotated via transform) -->
-        <g id="handGroup" transform="rotate(0)">
-          <!-- long thin hand from center outward -->
-          <line x1="0" y1="0" x2="0" y2="-220" class="hand" stroke-linecap="round" />
+      <!-- group centered at (500,800) -->
+      <g id="clockGroup" transform="translate(500,800)">
+        <!-- White wedge polygon (clipped to rectangle) -->
+        <g clip-path="url(#rectClip)">
+          <polygon id="dayWedge" points="" fill="white" />
         </g>
 
-        <!-- Center dot -->
-        <circle cx="0" cy="0" r="10" class="center-dot"></circle>
+        <!-- Thin hand (line) from center outward, rotated via transform on 'handGroup' -->
+        <g id="handGroup" transform="rotate(0)">
+          <line x1="0" y1="0" x2="0" y2="-600" class="hand" stroke="white" />
+        </g>
 
-        <!-- Numbers (0-23) will be placed in group 'numbersGroup' -->
+        <!-- Numbers group -->
         <g id="numbersGroup"></g>
       </g>
     </svg>
   </div>
 
 <script>
-/*
-  Wadokei 24-hour clock (black & white only)
-  - Uses sunrise-sunset.org API to fetch times (UTC ISO strings)
-  - Converts sunrise/sunset instants to America/Los_Angeles local fractional hours
-  - Renders a white sector between sunrise and sunset on a 24-hour circle
-  - Places 0..23 labels around the edge, coloring each label black or white depending on
-    whether it falls in the daylight sector
-  - Single hand rotates once per 24 hours; hand color inverts to contrast underlying sector
+/* Rectangular Wadokei 24-hour clock
+   - Geometric wedge (white) between sunrise and sunset
+   - Labels 0..23 stretched on ellipse
+   - Thin hand pointing to Port Angeles local time
+   - Auto-fetch sunrise/sunset daily
 */
 
-// Port Angeles coordinates
+// Constants / config
 const LAT = 48.1181;
 const LON = -123.4307;
 const TIMEZONE = 'America/Los_Angeles';
 
-// Geometry / layout constants (match viewBox)
-const CX = 0;   // where group is at (we centered the group with transform)
-const CY = 0;
-const R = 240; // inner disk radius (for labeling on edge)
-const NUM_RADIUS = 300; // radius for numbers (slightly outside rim)
+// SVG geometry (in viewBox coordinates)
+const SVG_W = 1000;
+const SVG_H = 1600;
+const CX = SVG_W / 2;  // 500 via group transform we already centered: group's local (0,0) is center
+const CY = SVG_H / 2;  // not used here because of group transform
+// In group coordinates center is (0,0). We'll do computations relative to (0,0).
+const NUM_RX = 420;   // horizontal radius for numbers ellipse
+const NUM_RY = 700;   // vertical radius for numbers ellipse (stretched to fill rectangle)
+const HAND_LEN = Math.min(NUM_RX, NUM_RY) * 0.92; // nearly touches numbers
+const FAR_R = 10000;  // large radius for wedge points (then clipped to rect)
+
+// DOM refs
+const numbersGroup = document.getElementById('numbersGroup');
+const dayWedge = document.getElementById('dayWedge');
+const handGroup = document.getElementById('handGroup');
+
+// Sunrise/sunset fractions (hours 0..24)
+let sunriseFrac = 6; // placeholders until fetched
+let sunsetFrac = 18;
+
+// Helpers ---------------------------------------------------------
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// Helpers --------------------------------------------------------------------
 function createSVG(tag, attrs = {}) {
   const el = document.createElementNS(SVG_NS, tag);
-  Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k, v));
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
   return el;
 }
 
-// Convert an ISO datetime string (UTC) to fractional hour in America/Los_Angeles
+// Convert ISO instant to fractional hour in TIMEZONE
 function fractionalHourInTZ(isoString, tz = TIMEZONE) {
-  const d = new Date(isoString); // an instant
-  // Use Intl.DateTimeFormat to get hour/min/sec in the target tz
+  const d = new Date(isoString);
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     hour12: false,
@@ -157,140 +150,97 @@ function fractionalHourInTZ(isoString, tz = TIMEZONE) {
   return hh + mm/60 + ss/3600;
 }
 
-// Map a fractional hour [0,24) to an angle in radians for our circle where:
-//   0 (midnight) -> bottom (south) ; 12 (noon) -> top (north)
-// We already centered group at (500,300) so math is around (0,0)
+// Map fractional hour to angle (radians)
+// 0 => bottom (south), 12 => top (north). We use angle = (hour/24)*360 + 90 degrees
 function hourToAngleRad(hourFrac) {
-  // convert fraction of day to radians where 0 hours => angle = 90deg (pointing down)
-  // formula: angleDeg = (hour/24)*360 + 90
-  const deg = (hourFrac/24)*360 + 90;
+  const deg = (hourFrac / 24) * 360 + 90;
   return deg * Math.PI / 180;
 }
 
-// Given start & end fractional hours, produce an SVG path for the sector (pie slice)
-// We'll draw a filled sector from center to outer radius (so daylight is a filled pie slice).
-function sectorPath(startFrac, endFrac, outerR) {
-  // normalize start/end to [0,24)
+// Determine if an hour frac lies in daylight sector (handles wrap)
+function isInDaylight(hourFrac, sFrac, eFrac) {
+  hourFrac = (hourFrac % 24 + 24) % 24;
+  sFrac = (sFrac % 24 + 24) % 24;
+  eFrac = (eFrac % 24 + 24) % 24;
+  if (sFrac <= eFrac) {
+    return hourFrac >= sFrac && hourFrac < eFrac;
+  } else {
+    return hourFrac >= sFrac || hourFrac < eFrac;
+  }
+}
+
+// Build the wedge polygon points (geometric wedge clipped to rect by clipPath).
+// We will produce: center (0,0), then series of far points along angles from start -> end.
+// Handles wrap-around.
+function buildWedgePoints(startFrac, endFrac) {
+  // normalize to [0,24)
   startFrac = (startFrac % 24 + 24) % 24;
   endFrac = (endFrac % 24 + 24) % 24;
 
-  // We must handle wrap-around (e.g., sunset < sunrise)
-  // If end <= start, we will treat the sector as spanning across midnight: split into two arcs
-  const segments = [];
-  if (endFrac <= startFrac) {
-    segments.push([startFrac, 24]);
-    segments.push([0, endFrac]);
-  } else {
-    segments.push([startFrac, endFrac]);
+  const pts = [];
+  pts.push(`0,0`); // center in group coords
+
+  // We'll generate angles stepping at e.g., 1 degree increments (or smaller if large span)
+  // Determine angular sweep in degrees
+  let startDeg = (startFrac / 24) * 360 + 90;
+  let endDeg = (endFrac / 24) * 360 + 90;
+
+  // Normalize angles to 0..360 and ensure end follows start (so we sweep the correct direction)
+  startDeg = ((startDeg % 360) + 360) % 360;
+  endDeg = ((endDeg % 360) + 360) % 360;
+
+  // Determine sweep going increasing degrees. If endDeg <= startDeg, add 360 to endDeg.
+  if (endDeg <= startDeg) endDeg += 360;
+
+  const stepDeg = 2; // 2 degree step is fine (smaller = smoother)
+  for (let deg = startDeg; deg <= endDeg + 0.001; deg += stepDeg) {
+    const rad = deg * Math.PI / 180;
+    const x = Math.cos(rad) * FAR_R;
+    const y = Math.sin(rad) * FAR_R;
+    pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
   }
 
-  // We'll create a combined path by union of segments (multiple pie slices)
-  const parts = [];
+  // ensure last point exactly at endDeg
+  const lastRad = endDeg * Math.PI / 180;
+  pts.push(`${(Math.cos(lastRad) * FAR_R).toFixed(2)},${(Math.sin(lastRad) * FAR_R).toFixed(2)}`);
 
-  for (const seg of segments) {
-    const [s, e] = seg;
-    const sAng = hourToAngleRad(s);
-    const eAng = hourToAngleRad(e);
-
-    // start point on circle
-    const sx = outerR * Math.cos(sAng);
-    const sy = outerR * Math.sin(sAng);
-    const ex = outerR * Math.cos(eAng);
-    const ey = outerR * Math.sin(eAng);
-
-    // large arc flag: if arc spans > 180deg
-    const spanDeg = ((e - s) / 24) * 360;
-    const large = (spanDeg > 180) ? 1 : 0;
-
-    // path: move to center, line to start, arc to end, close
-    parts.push(`M 0 0 L ${sx.toFixed(4)} ${sy.toFixed(4)} A ${outerR} ${outerR} 0 ${large} 1 ${ex.toFixed(4)} ${ey.toFixed(4)} Z`);
-  }
-
-  return parts.join(' ');
+  return pts.join(' ');
 }
 
-// Determine whether an hour fraction sits within daylight sector (handles wrap)
-function isInDaylight(hourFrac, sunriseFrac, sunsetFrac) {
-  hourFrac = (hourFrac % 24 + 24) % 24;
-  sunriseFrac = (sunriseFrac % 24 + 24) % 24;
-  sunsetFrac = (sunsetFrac % 24 + 24) % 24;
-
-  if (sunriseFrac <= sunsetFrac) {
-    return hourFrac >= sunriseFrac && hourFrac < sunsetFrac;
-  } else {
-    // daylight wraps midnight (rare for this location, but handle)
-    return hourFrac >= sunriseFrac || hourFrac < sunsetFrac;
-  }
-}
-
-// Fetch sunrise/sunset from sunrise-sunset.org API (returns ISO utc strings)
-async function fetchSunTimes(lat, lon) {
-  const url = `https://api.sunrise-sunset.org/json?lat=${lat}&lng=${lon}&formatted=0`;
-  const res = await fetch(url);
-  const j = await res.json();
-  if (j.status !== 'OK') throw new Error('Sun API error');
-  return {
-    sunriseISO: j.results.sunrise,
-    sunsetISO:  j.results.sunset
-  };
-}
-
-// Rendering ------------------------------------------------------------------
-const numbersGroup = document.getElementById('numbersGroup');
-const dayGroup = document.getElementById('dayGroup');
-const handGroup = document.getElementById('handGroup');
-const clockSVG = document.getElementById('clockSVG');
-
-let sunriseFrac = 5.9; // defaults (will be replaced)
-let sunsetFrac  = 19.9;
-
+// Render numbers stretched on ellipse, color depending on daylight
 function renderNumbers() {
-  // Clear
+  // clear
   while (numbersGroup.firstChild) numbersGroup.removeChild(numbersGroup.firstChild);
 
   for (let h = 0; h < 24; h++) {
-    // angle for label
     const ang = hourToAngleRad(h);
-    const x = NUM_RADIUS * Math.cos(ang);
-    const y = NUM_RADIUS * Math.sin(ang);
+    // ellipse param: x = rx * cos(angle); y = ry * sin(angle)
+    const x = NUM_RX * Math.cos(ang);
+    const y = NUM_RY * Math.sin(ang);
 
-    const text = createSVG('text', {
+    const t = createSVG('text', {
       class: 'number',
       x: x,
-      y: y
+      y: y,
+      fill: isInDaylight(h + 0.0001, sunriseFrac, sunsetFrac) ? 'black' : 'white'
     });
-    text.textContent = String(h);
-    // choose fill based on whether this label is on day or night
-    const inDay = isInDaylight(h + 0.0001, sunriseFrac, sunsetFrac); // tiny offset to classify
-    text.setAttribute('fill', inDay ? 'black' : 'white');
-    numbersGroup.appendChild(text);
+    t.textContent = String(h);
+    numbersGroup.appendChild(t);
   }
 }
 
-function renderDaySector() {
-  // Clear
-  while (dayGroup.firstChild) dayGroup.removeChild(dayGroup.firstChild);
-
-  // Create path for daylight sector (outerR = R)
-  const pathD = sectorPath(sunriseFrac, sunsetFrac, R);
-
-  const p = createSVG('path', {
-    d: pathD,
-    fill: 'white'
-  });
-  dayGroup.appendChild(p);
-
-  // Put a slightly smaller black circle on top to create a ring look (to keep center dark)
-  // But we want the center to match underlying night/day? In current spec, center follows arc.
-  // To keep the inner region consistent and emphasize ring, draw an inner black circle
-  const inner = createSVG('circle', { r: (R - 60).toString(), fill: 'black' });
-  dayGroup.appendChild(inner);
+// Update day wedge polygon and numbers fill
+function renderDayWedge() {
+  const pts = buildWedgePoints(sunriseFrac, sunsetFrac);
+  dayWedge.setAttribute('points', pts);
+  // ensure numbers recolor
+  renderNumbers();
 }
 
-function updateHandAndColors() {
+// Update hand position (based on Port Angeles local time) and hand color
+function updateHand() {
+  // get current local time in TIMEZONE
   const now = new Date();
-
-  // Obtain the current time as fractional hours in America/Los_Angeles
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: TIMEZONE,
     hour12: false,
@@ -301,84 +251,47 @@ function updateHandAndColors() {
 
   let hh=0, mm=0, ss=0;
   for (const p of parts) {
-    if (p.type==='hour') hh = parseInt(p.value,10);
-    if (p.type==='minute') mm = parseInt(p.value,10);
-    if (p.type==='second') ss = parseInt(p.value,10);
+    if (p.type === 'hour') hh = parseInt(p.value, 10);
+    if (p.type === 'minute') mm = parseInt(p.value, 10);
+    if (p.type === 'second') ss = parseInt(p.value, 10);
   }
   const frac = hh + mm/60 + ss/3600;
 
-  // rotate hand: rotation = frac/24*360 + 90deg (so 0 -> bottom)
-  const deg = (frac/24)*360 + 90;
+  // compute angle deg for rotation of handGroup
+  const deg = (frac / 24) * 360 + 90;
   handGroup.setAttribute('transform', `rotate(${deg})`);
 
-  // Determine whether current time is in daylight to set overall page color variables
-  const nowIsDay = isInDaylight(frac, sunriseFrac, sunsetFrac);
+  // set hand stroke color to contrast underlying sector at that hour
+  const onDay = isInDaylight(frac, sunriseFrac, sunsetFrac);
+  // hand length is set by the line's y2 attribute (-HAND_LEN). We set stroke via style
+  const line = handGroup.querySelector('line');
+  line.setAttribute('stroke', onDay ? 'black' : 'white');
 
-  // We'll set CSS color variables by toggling document color (currentColor used by strokes)
-  // If it's day at the current *entire clock*, we don't want to invert entire page — instead
-  // since we drew daylight as a white sector on top of a black disc, we keep the page background black
-  // and rely on element 'currentColor' for strokes. We'll set 'currentColor' to the contrasting
-  // color for the hand/outer rim based on where the hand endpoint sits (hand tip position).
-  // Simpler: if hand's location is on daylight, use black hand (since daylight is white). Else white.
-  const handOnDay = isInDaylight(frac, sunriseFrac, sunsetFrac);
-
-  // Set currentColor by manipulating a style on the rim/hand/center via document element color
-  // We'll set the <g id="clockGroup"> parent's color by applying a style attribute.
-  const clockGroup = document.getElementById('clockGroup');
-  clockGroup.style.color = handOnDay ? 'black' : 'white';
+  // Also update stroke width slightly if needed for readability on high-res e-ink (optional)
 }
 
-// Init & daily refresh -------------------------------------------------------
-async function initialize() {
+// Fetch sunrise/sunset and initialize
+async function fetchSun() {
+  const url = `https://api.sunrise-sunset.org/json?lat=${LAT}&lng=${LON}&formatted=0`;
   try {
-    const sun = await fetchSunTimes(LAT, LON);
-    sunriseFrac = fractionalHourInTZ(sun.sunriseISO, TIMEZONE);
-    sunsetFrac  = fractionalHourInTZ(sun.sunsetISO,  TIMEZONE);
+    const res = await fetch(url);
+    const j = await res.json();
+    if (j.status === 'OK') {
+      sunriseFrac = fractionalHourInTZ(j.results.sunrise, TIMEZONE);
+      sunsetFrac  = fractionalHourInTZ(j.results.sunset, TIMEZONE);
+    } else {
+      console.warn('Sun API returned non-OK', j);
+    }
   } catch (e) {
-    console.error('Sun fetch failed, using defaults:', e);
-    // keep defaults
+    console.error('Sun fetch failed:', e);
   }
-
-  renderDaySector();
-  renderNumbers();
-  updateHandAndColors();
-
-  // Update every second for hand movement
-  setInterval(() => {
-    updateHandAndColors();
-  }, 1000);
-
-  // Recompute sunrise/sunset at midnight local time (and re-render numbers/day sector)
-  scheduleDailySunUpdate();
 }
 
-// Schedule an update at the next local midnight in America/Los_Angeles
-function scheduleDailySunUpdate() {
-  // compute ms until next local midnight in TIMEZONE
-  const now = new Date();
-  // get current date components in the target timezone via formatToParts for year/month/day
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(now);
-  let year=now.getFullYear(), month=now.getMonth()+1, day=now.getDate();
-  for (const p of parts) {
-    if (p.type==='year') year = parseInt(p.value,10);
-    if (p.type==='month') month = parseInt(p.value,10);
-    if (p.type==='day') day = parseInt(p.value,10);
-  }
-  // create a Date object representing next day at 00:05 in that timezone by building a locale string
-  // We'll find the next midnight by incrementing day and constructing an ISO via Date.UTC for the tz offset.
-  // Simpler approach: compute local midnight in user's local time that corresponds to target tz midnight:
-  // Build a string "YYYY-MM-DDT00:05:00" and interpret it in the target timezone by using Date.toLocaleString with tz
-  // The following approach constructs a Date for the next midnight by using the timezone offset calculation.
-
-  // Build a Date object for the target timezone midnight by parsing a string in that timezone.
-  const nextDay = new Date(Date.UTC(year, month-1, day, 0, 5)); // this is 00:05 UTC => not right
-  // Simpler and robust: just set a timer for 30 minutes, and at each call check if the local date (in TZ) changed.
-  // That avoids timezone complexities for scheduling.
-
-  let lastLocalDate = null;
-  function pollForDateChange() {
+// Scheduling daily refresh: simple poll for date change in target timezone
+function scheduleDailyRefresh() {
+  let lastDateKey = null;
+  const check = () => {
     const now = new Date();
-    // get local date in TIMEZONE
     const parts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(now);
     let y=now.getFullYear(), m=now.getMonth()+1, d=now.getDate();
     for (const p of parts) {
@@ -386,33 +299,36 @@ function scheduleDailySunUpdate() {
       if (p.type==='month') m = parseInt(p.value,10);
       if (p.type==='day') d = parseInt(p.value,10);
     }
-    const localDateKey = `${y}-${m}-${d}`;
-    if (!lastLocalDate) lastLocalDate = localDateKey;
-    if (localDateKey !== lastLocalDate) {
-      // date changed in target tz -> refresh sunrise/sunset
-      lastLocalDate = localDateKey;
-      refreshSunTimes();
+    const key = `${y}-${m}-${d}`;
+    if (!lastDateKey) lastDateKey = key;
+    if (key !== lastDateKey) {
+      lastDateKey = key;
+      // date changed in target tz — refresh sunrise/sunset
+      fetchSun().then(() => { renderDayWedge(); updateHand(); });
     }
-  }
-
-  // poll every 30 seconds - lightweight and reliable
-  setInterval(pollForDateChange, 30000);
+  };
+  setInterval(check, 30000); // check every 30s
 }
 
-async function refreshSunTimes() {
-  try {
-    const sun = await fetchSunTimes(LAT, LON);
-    sunriseFrac = fractionalHourInTZ(sun.sunriseISO, TIMEZONE);
-    sunsetFrac  = fractionalHourInTZ(sun.sunsetISO,  TIMEZONE);
-    renderDaySector();
-    renderNumbers();
-  } catch (e) {
-    console.error('refresh sun failed', e);
-  }
+// Kickoff
+async function init() {
+  // create initial numbers (will be recolored after fetching sun)
+  renderNumbers();
+
+  // fetch sunrise/sunset and render wedge
+  await fetchSun();
+  renderDayWedge();
+
+  // start hand update (every 1s)
+  updateHand();
+  setInterval(updateHand, 1000);
+
+  // daily refresh schedule
+  scheduleDailyRefresh();
 }
 
-// Kick off
-initialize();
+// Start
+init();
 
 </script>
 </body>
