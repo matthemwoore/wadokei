@@ -5,133 +5,99 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Wadokei — Rectangular 24h (Port Angeles)</title>
 
-  <!-- Japanese-feel font -->
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&display=swap" rel="stylesheet">
 
   <style>
-    :root {
-      --black: #000;
-      --white: #fff;
+    :root { --black:#000; --white:#fff; }
+
+    html,body{
+      height:100%;
+      margin:0;
+      background:var(--black);
+      color:var(--white);
+      font-family:"Noto Serif JP", serif;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
     }
 
-    html, body {
-      height: 100%;
-      margin: 0;
-      background: var(--black);
-      color: var(--white);
-      font-family: "Noto Serif JP", serif;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    /* Full-screen frame */
-    .frame {
-      width: 100vw;
-      height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    /* SVG occupies entire container */
-    svg {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
+    .frame { width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; }
+    svg { width:100%; height:100%; display:block; }
 
     .number {
-      font-size: 3.2vh;     /* scales to screen height */
-      font-weight: 700;
+      font-size: 3.2vh;
+      font-weight:700;
       text-anchor: middle;
       dominant-baseline: middle;
       pointer-events: none;
     }
 
-    .hand {
-      stroke-width: 6;      /* thin line; adjust if needed for readability */
-      stroke-linecap: butt;
-      stroke: currentColor;
-    }
-
-    /* We'll let fill/stroke be set by attributes; keep CSS minimal */
+    .hand { stroke-width:6; stroke-linecap: butt; }
   </style>
 </head>
 <body>
   <div class="frame">
-    <!-- viewBox is tall-ish rectangle to suit TRMNL vertical display; numbers will stretch to ellipse -->
+    <!-- Big tall rectangle for TRMNL -->
     <svg id="svg" viewBox="0 0 1000 1600" preserveAspectRatio="xMidYMid meet" aria-label="Rectangular Wadokei 24-hour clock">
-      <!-- background black -->
+      <!-- black background -->
       <rect x="0" y="0" width="1000" height="1600" fill="black"></rect>
 
-      <!-- clip path (rectangle) - polygon wedge will be clipped to this rect -->
       <defs>
         <clipPath id="rectClip">
           <rect x="0" y="0" width="1000" height="1600" />
         </clipPath>
       </defs>
 
-      <!-- group centered at (500,800) -->
+      <!-- Day wedge (global coords). Will be clipped to rectClip -->
+      <g clip-path="url(#rectClip)">
+        <polygon id="dayWedge" points="" fill="white"></polygon>
+      </g>
+
+      <!-- Clock center group (center at 500,800) -->
       <g id="clockGroup" transform="translate(500,800)">
-        <!-- White wedge polygon (clipped to rectangle) -->
-        <g clip-path="url(#rectClip)">
-          <polygon id="dayWedge" points="" fill="white" />
-        </g>
-
-        <!-- Thin hand (line) from center outward, rotated via transform on 'handGroup' -->
+        <!-- Hand group (rotate applied) -->
         <g id="handGroup" transform="rotate(0)">
-          <line x1="0" y1="0" x2="0" y2="-600" class="hand" stroke="white" />
+          <!-- line goes from center outward (negative y) so rotate math matches numbers -->
+          <line id="handLine" x1="0" y1="0" x2="0" y2="-850" class="hand" stroke="white"></line>
         </g>
 
-        <!-- Numbers group -->
+        <!-- Numbers layered above hand -->
         <g id="numbersGroup"></g>
       </g>
     </svg>
   </div>
 
 <script>
-/* Rectangular Wadokei 24-hour clock
-   - Geometric wedge (white) between sunrise and sunset
-   - Labels 0..23 stretched on ellipse
-   - Thin hand pointing to Port Angeles local time
-   - Auto-fetch sunrise/sunset daily
+/* Rectangular Wadokei — geometric wedge, stretched numbers, correct hand math
+   Port Angeles dynamic sunrise/sunset, hand contrasts against underlying sector.
 */
 
-// Constants / config
+// Config
 const LAT = 48.1181;
 const LON = -123.4307;
 const TIMEZONE = 'America/Los_Angeles';
 
-// SVG geometry (in viewBox coordinates)
-const SVG_W = 1000;
-const SVG_H = 1600;
-const CX = SVG_W / 2;  // 500 via group transform we already centered: group's local (0,0) is center
-const CY = SVG_H / 2;  // not used here because of group transform
-// In group coordinates center is (0,0). We'll do computations relative to (0,0).
-const NUM_RX = 420;   // horizontal radius for numbers ellipse
-const NUM_RY = 700;   // vertical radius for numbers ellipse (stretched to fill rectangle)
+// SVG geometry
+const SVG_W = 1000, SVG_H = 1600;
+const CENTER_X = 500, CENTER_Y = 800;
+const NUM_RX = 420;  // horizontal ellipse radius for numbers
+const NUM_RY = 700;  // vertical ellipse radius for numbers
 const HAND_LEN = Math.min(NUM_RX, NUM_RY) * 0.92; // nearly touches numbers
-const FAR_R = 10000;  // large radius for wedge points (then clipped to rect)
+const FAR_R = 6000; // far point for wedge polygon (big enough to reach edges)
 
 // DOM refs
-const numbersGroup = document.getElementById('numbersGroup');
 const dayWedge = document.getElementById('dayWedge');
+const numbersGroup = document.getElementById('numbersGroup');
 const handGroup = document.getElementById('handGroup');
+const handLine = document.getElementById('handLine');
 
-// Sunrise/sunset fractions (hours 0..24)
-let sunriseFrac = 6; // placeholders until fetched
+// sunrise/sunset fractions (hours 0..24)
+let sunriseFrac = 6;
 let sunsetFrac = 18;
 
-// Helpers ---------------------------------------------------------
+// Utilities
 const SVG_NS = "http://www.w3.org/2000/svg";
+function createSVG(tag, attrs={}) { const el = document.createElementNS(SVG_NS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; }
 
-function createSVG(tag, attrs = {}) {
-  const el = document.createElementNS(SVG_NS, tag);
-  for (const k in attrs) el.setAttribute(k, attrs[k]);
-  return el;
-}
-
-// Convert ISO instant to fractional hour in TIMEZONE
 function fractionalHourInTZ(isoString, tz = TIMEZONE) {
   const d = new Date(isoString);
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -143,103 +109,88 @@ function fractionalHourInTZ(isoString, tz = TIMEZONE) {
   }).formatToParts(d);
   let hh=0, mm=0, ss=0;
   for (const p of parts) {
-    if (p.type === 'hour') hh = parseInt(p.value,10);
-    if (p.type === 'minute') mm = parseInt(p.value,10);
-    if (p.type === 'second') ss = parseInt(p.value,10);
+    if (p.type==='hour') hh = parseInt(p.value,10);
+    if (p.type==='minute') mm = parseInt(p.value,10);
+    if (p.type==='second') ss = parseInt(p.value,10);
   }
   return hh + mm/60 + ss/3600;
 }
 
-// Map fractional hour to angle (radians)
-// 0 => bottom (south), 12 => top (north). We use angle = (hour/24)*360 + 90 degrees
-function hourToAngleRad(hourFrac) {
-  const deg = (hourFrac / 24) * 360 + 90;
-  return deg * Math.PI / 180;
+// Map hour fraction to radians using same scheme as numbers:
+// desiredDeg (from +x axis) = (hour/24)*360 + 90
+function hourToDeg(hourFrac) {
+  return (hourFrac / 24) * 360 + 90;
 }
+function degToRad(deg) { return deg * Math.PI / 180; }
 
-// Determine if an hour frac lies in daylight sector (handles wrap)
+// isInDaylight helper (handles wrap)
 function isInDaylight(hourFrac, sFrac, eFrac) {
   hourFrac = (hourFrac % 24 + 24) % 24;
   sFrac = (sFrac % 24 + 24) % 24;
   eFrac = (eFrac % 24 + 24) % 24;
-  if (sFrac <= eFrac) {
-    return hourFrac >= sFrac && hourFrac < eFrac;
-  } else {
-    return hourFrac >= sFrac || hourFrac < eFrac;
-  }
+  if (sFrac <= eFrac) return hourFrac >= sFrac && hourFrac < eFrac;
+  return hourFrac >= sFrac || hourFrac < eFrac;
 }
 
-// Build the wedge polygon points (geometric wedge clipped to rect by clipPath).
-// We will produce: center (0,0), then series of far points along angles from start -> end.
-// Handles wrap-around.
-function buildWedgePoints(startFrac, endFrac) {
-  // normalize to [0,24)
+// Build wedge polygon in global coords: center plus many far points between start->end
+function buildWedgeGlobalPoints(startFrac, endFrac) {
   startFrac = (startFrac % 24 + 24) % 24;
   endFrac = (endFrac % 24 + 24) % 24;
 
-  const pts = [];
-  pts.push(`0,0`); // center in group coords
+  let startDeg = hourToDeg(startFrac);
+  let endDeg = hourToDeg(endFrac);
 
-  // We'll generate angles stepping at e.g., 1 degree increments (or smaller if large span)
-  // Determine angular sweep in degrees
-  let startDeg = (startFrac / 24) * 360 + 90;
-  let endDeg = (endFrac / 24) * 360 + 90;
-
-  // Normalize angles to 0..360 and ensure end follows start (so we sweep the correct direction)
+  // normalize 0..360
   startDeg = ((startDeg % 360) + 360) % 360;
   endDeg = ((endDeg % 360) + 360) % 360;
-
-  // Determine sweep going increasing degrees. If endDeg <= startDeg, add 360 to endDeg.
   if (endDeg <= startDeg) endDeg += 360;
 
-  const stepDeg = 2; // 2 degree step is fine (smaller = smoother)
-  for (let deg = startDeg; deg <= endDeg + 0.001; deg += stepDeg) {
-    const rad = deg * Math.PI / 180;
-    const x = Math.cos(rad) * FAR_R;
-    const y = Math.sin(rad) * FAR_R;
+  const step = 2; // degrees
+  const pts = [];
+  // start with center
+  pts.push(`${CENTER_X},${CENTER_Y}`);
+  // sweep from start to end (inclusive)
+  for (let deg = startDeg; deg <= endDeg + 0.0001; deg += step) {
+    const rad = degToRad(deg);
+    const x = CENTER_X + Math.cos(rad) * FAR_R;
+    const y = CENTER_Y + Math.sin(rad) * FAR_R;
     pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
   }
-
-  // ensure last point exactly at endDeg
-  const lastRad = endDeg * Math.PI / 180;
-  pts.push(`${(Math.cos(lastRad) * FAR_R).toFixed(2)},${(Math.sin(lastRad) * FAR_R).toFixed(2)}`);
-
+  // ensure last point
+  const lastRad = degToRad(endDeg);
+  pts.push(`${(CENTER_X + Math.cos(lastRad)*FAR_R).toFixed(2)},${(CENTER_Y + Math.sin(lastRad)*FAR_R).toFixed(2)}`);
   return pts.join(' ');
 }
 
-// Render numbers stretched on ellipse, color depending on daylight
+// Render numbers stretched on ellipse and color them
 function renderNumbers() {
-  // clear
   while (numbersGroup.firstChild) numbersGroup.removeChild(numbersGroup.firstChild);
-
   for (let h = 0; h < 24; h++) {
-    const ang = hourToAngleRad(h);
-    // ellipse param: x = rx * cos(angle); y = ry * sin(angle)
-    const x = NUM_RX * Math.cos(ang);
-    const y = NUM_RY * Math.sin(ang);
-
-    const t = createSVG('text', {
+    const deg = hourToDeg(h);
+    const rad = degToRad(deg);
+    const x = Math.cos(rad) * NUM_RX;
+    const y = Math.sin(rad) * NUM_RY;
+    const txt = createSVG('text', {
       class: 'number',
       x: x,
       y: y,
       fill: isInDaylight(h + 0.0001, sunriseFrac, sunsetFrac) ? 'black' : 'white'
     });
-    t.textContent = String(h);
-    numbersGroup.appendChild(t);
+    txt.textContent = String(h);
+    numbersGroup.appendChild(txt);
   }
 }
 
-// Update day wedge polygon and numbers fill
-function renderDayWedge() {
-  const pts = buildWedgePoints(sunriseFrac, sunsetFrac);
+// Render wedge and recolor numbers
+function renderWedgeAndNumbers() {
+  const pts = buildWedgeGlobalPoints(sunriseFrac, sunsetFrac);
   dayWedge.setAttribute('points', pts);
-  // ensure numbers recolor
   renderNumbers();
 }
 
-// Update hand position (based on Port Angeles local time) and hand color
+// Update the hand: rotation and stroke color contrasting underlying wedge
 function updateHand() {
-  // get current local time in TIMEZONE
+  // get current time in target TZ
   const now = new Date();
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: TIMEZONE,
@@ -248,48 +199,47 @@ function updateHand() {
     minute: '2-digit',
     second: '2-digit'
   }).formatToParts(now);
-
   let hh=0, mm=0, ss=0;
   for (const p of parts) {
-    if (p.type === 'hour') hh = parseInt(p.value, 10);
-    if (p.type === 'minute') mm = parseInt(p.value, 10);
-    if (p.type === 'second') ss = parseInt(p.value, 10);
+    if (p.type==='hour') hh = parseInt(p.value,10);
+    if (p.type==='minute') mm = parseInt(p.value,10);
+    if (p.type==='second') ss = parseInt(p.value,10);
   }
   const frac = hh + mm/60 + ss/3600;
 
-  // compute angle deg for rotation of handGroup
-  const deg = (frac / 24) * 360 + 90;
-  handGroup.setAttribute('transform', `rotate(${deg})`);
+  // Compute desiredDeg (same as numbers). For line that initially points up (0,-len),
+  // rotation = desiredDeg + 90 puts it in correct orientation so 0->bottom,12->top.
+  const desiredDeg = hourToDeg(frac);
+  const rotation = desiredDeg + 90;
+  handGroup.setAttribute('transform', `rotate(${rotation})`);
 
-  // set hand stroke color to contrast underlying sector at that hour
+  // Hand color: contrast underlying sector at current fractional position
   const onDay = isInDaylight(frac, sunriseFrac, sunsetFrac);
-  // hand length is set by the line's y2 attribute (-HAND_LEN). We set stroke via style
-  const line = handGroup.querySelector('line');
-  line.setAttribute('stroke', onDay ? 'black' : 'white');
+  handLine.setAttribute('stroke', onDay ? 'black' : 'white');
 
-  // Also update stroke width slightly if needed for readability on high-res e-ink (optional)
+  // also adjust hand length to nearly touch numbers (y2 negative)
+  handLine.setAttribute('y2', `${-HAND_LEN}`);
 }
 
-// Fetch sunrise/sunset and initialize
-async function fetchSun() {
-  const url = `https://api.sunrise-sunset.org/json?lat=${LAT}&lng=${LON}&formatted=0`;
+// Fetch sunrise/sunset and schedule daily refreshes
+async function fetchSunTimes() {
   try {
-    const res = await fetch(url);
+    const res = await fetch(`https://api.sunrise-sunset.org/json?lat=${LAT}&lng=${LON}&formatted=0`);
     const j = await res.json();
     if (j.status === 'OK') {
       sunriseFrac = fractionalHourInTZ(j.results.sunrise, TIMEZONE);
       sunsetFrac  = fractionalHourInTZ(j.results.sunset, TIMEZONE);
     } else {
-      console.warn('Sun API returned non-OK', j);
+      console.warn('Sun API not OK', j);
     }
   } catch (e) {
-    console.error('Sun fetch failed:', e);
+    console.error('Sun fetch failed', e);
   }
 }
 
-// Scheduling daily refresh: simple poll for date change in target timezone
+// Poll for local date change in target TZ and refresh times
 function scheduleDailyRefresh() {
-  let lastDateKey = null;
+  let lastKey = null;
   const check = () => {
     const now = new Date();
     const parts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(now);
@@ -300,34 +250,32 @@ function scheduleDailyRefresh() {
       if (p.type==='day') d = parseInt(p.value,10);
     }
     const key = `${y}-${m}-${d}`;
-    if (!lastDateKey) lastDateKey = key;
-    if (key !== lastDateKey) {
-      lastDateKey = key;
-      // date changed in target tz — refresh sunrise/sunset
-      fetchSun().then(() => { renderDayWedge(); updateHand(); });
+    if (!lastKey) lastKey = key;
+    if (key !== lastKey) {
+      lastKey = key;
+      fetchSunTimes().then(() => renderWedgeAndNumbers());
     }
   };
-  setInterval(check, 30000); // check every 30s
+  setInterval(check, 30000);
 }
 
-// Kickoff
+// Init sequence
 async function init() {
-  // create initial numbers (will be recolored after fetching sun)
+  // initial numbers (will recolor once we fetch)
   renderNumbers();
 
   // fetch sunrise/sunset and render wedge
-  await fetchSun();
-  renderDayWedge();
+  await fetchSunTimes();
+  renderWedgeAndNumbers();
 
-  // start hand update (every 1s)
+  // start hand ticking
   updateHand();
   setInterval(updateHand, 1000);
 
-  // daily refresh schedule
+  // daily refresh
   scheduleDailyRefresh();
 }
 
-// Start
 init();
 
 </script>
