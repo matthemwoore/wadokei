@@ -1,140 +1,419 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Wadokei Clock</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Wadokei 24h — Port Angeles</title>
+
+  <!-- Noto Serif JP -->
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700&display=swap" rel="stylesheet">
+
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: black;
-      transition: background-color 0.5s ease;
+    :root{
+      --bg-night: #000;
+      --bg-day:  #fff;
     }
 
-    .clock {
-      position: relative;
-      width: 95vw;
-      height: 60vh;
-      border: 6px solid currentColor;
-      border-radius: 1.5rem;
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
+    html,body{
+      height:100%;
+      margin:0;
+      padding:0;
+      background: var(--bg-night);
+      color: var(--bg-day);
+      font-family: "Noto Serif JP", serif;
     }
 
-    .numbers {
-      position: absolute;
-      width: 100%;
-      height: 100%;
-      font-family: sans-serif;
-      font-weight: 600;
-      font-size: 2.5vw;
+    /* Full-screen container */
+    .frame {
+      width:100vw;
+      height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+
+    /* SVG sits edge-to-edge but keeps some internal margin so numbers aren't clipped */
+    svg {
+      width:100%;
+      height:100%;
+      display:block;
+    }
+
+    /* For small screens prefer slightly thicker stroke */
+    .rim { stroke: currentColor; stroke-width: 6; fill: none; }
+    .hand {
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-width: 12;
+    }
+
+    .center-dot {
+      fill: currentColor;
+      stroke: none;
     }
 
     .number {
-      position: absolute;
-      transform: translate(-50%, -50%);
+      font-size: 2.8vh;
+      dominant-baseline: middle;
+      text-anchor: middle;
+      font-weight: 600;
+      pointer-events: none;
     }
 
-    .hand {
-      position: absolute;
-      bottom: 50%;
-      left: 50%;
-      transform-origin: bottom center;
-      background-color: currentColor;
-      border-radius: 3px;
-      transform: translateX(-50%) rotate(0deg);
-    }
+    /* ensure crisp B/W rendering */
+    .day-fill { fill: var(--bg-day); }
+    .night-fill { fill: var(--bg-night); }
 
-    .hour-hand {
-      width: 0.7vw;
-      height: 25%;
-    }
-
-    .minute-hand {
-      width: 0.4vw;
-      height: 40%;
-    }
-
-    .center {
-      position: absolute;
-      width: 1.2vw;
-      height: 1.2vw;
-      background-color: currentColor;
-      border-radius: 50%;
-    }
   </style>
 </head>
 <body>
-  <div class="clock">
-    <div class="numbers" id="numbers"></div>
-    <div class="hand hour-hand" id="hour-hand"></div>
-    <div class="hand minute-hand" id="minute-hand"></div>
-    <div class="center"></div>
+  <div class="frame">
+    <!-- SVG coordinate system: wide rectangle to match TRMNL orientation -->
+    <svg id="clockSVG" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" aria-label="Wadokei 24-hour clock">
+      <!-- black background (night) full circle -->
+      <rect x="0" y="0" width="1000" height="600" fill="black"></rect>
+
+      <!-- center for circle -->
+      <!-- We'll draw a full black ring then overlay a white sector for daylight -->
+
+      <!-- Ring background (night) as a circle -->
+      <g id="clockGroup" transform="translate(500,300)">
+        <!-- Outer rim (in currentColor for contrast stroke around outer) -->
+        <circle r="260" class="rim" fill="none" />
+
+        <!-- Night base ring: draw as full disc black (already rect behind) but keep a ring visual -->
+        <circle r="240" fill="black" />
+
+        <!-- Daylight arc will be injected here as a white filled path -->
+        <g id="dayGroup"></g>
+
+        <!-- Outer rim stroke -->
+        <circle r="260" fill="none" class="rim" />
+
+        <!-- Hour hand (rotated via transform) -->
+        <g id="handGroup" transform="rotate(0)">
+          <!-- long thin hand from center outward -->
+          <line x1="0" y1="0" x2="0" y2="-220" class="hand" stroke-linecap="round" />
+        </g>
+
+        <!-- Center dot -->
+        <circle cx="0" cy="0" r="10" class="center-dot"></circle>
+
+        <!-- Numbers (0-23) will be placed in group 'numbersGroup' -->
+        <g id="numbersGroup"></g>
+      </g>
+    </svg>
   </div>
 
-  <script>
-    const lat = 48.1181;
-    const lon = -123.4307;
+<script>
+/*
+  Wadokei 24-hour clock (black & white only)
+  - Uses sunrise-sunset.org API to fetch times (UTC ISO strings)
+  - Converts sunrise/sunset instants to America/Los_Angeles local fractional hours
+  - Renders a white sector between sunrise and sunset on a 24-hour circle
+  - Places 0..23 labels around the edge, coloring each label black or white depending on
+    whether it falls in the daylight sector
+  - Single hand rotates once per 24 hours; hand color inverts to contrast underlying sector
+*/
 
-    async function getSunTimes() {
-      const res = await fetch(`https://api.sunrise-sunset.org/json?lat=${lat}&lng=${lon}&formatted=0`);
-      const data = await res.json();
-      return {
-        sunrise: new Date(data.results.sunrise),
-        sunset: new Date(data.results.sunset)
-      };
+// Port Angeles coordinates
+const LAT = 48.1181;
+const LON = -123.4307;
+const TIMEZONE = 'America/Los_Angeles';
+
+// Geometry / layout constants (match viewBox)
+const CX = 0;   // where group is at (we centered the group with transform)
+const CY = 0;
+const R = 240; // inner disk radius (for labeling on edge)
+const NUM_RADIUS = 300; // radius for numbers (slightly outside rim)
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+// Helpers --------------------------------------------------------------------
+function createSVG(tag, attrs = {}) {
+  const el = document.createElementNS(SVG_NS, tag);
+  Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k, v));
+  return el;
+}
+
+// Convert an ISO datetime string (UTC) to fractional hour in America/Los_Angeles
+function fractionalHourInTZ(isoString, tz = TIMEZONE) {
+  const d = new Date(isoString); // an instant
+  // Use Intl.DateTimeFormat to get hour/min/sec in the target tz
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).formatToParts(d);
+  let hh=0, mm=0, ss=0;
+  for (const p of parts) {
+    if (p.type === 'hour') hh = parseInt(p.value,10);
+    if (p.type === 'minute') mm = parseInt(p.value,10);
+    if (p.type === 'second') ss = parseInt(p.value,10);
+  }
+  return hh + mm/60 + ss/3600;
+}
+
+// Map a fractional hour [0,24) to an angle in radians for our circle where:
+//   0 (midnight) -> bottom (south) ; 12 (noon) -> top (north)
+// We already centered group at (500,300) so math is around (0,0)
+function hourToAngleRad(hourFrac) {
+  // convert fraction of day to radians where 0 hours => angle = 90deg (pointing down)
+  // formula: angleDeg = (hour/24)*360 + 90
+  const deg = (hourFrac/24)*360 + 90;
+  return deg * Math.PI / 180;
+}
+
+// Given start & end fractional hours, produce an SVG path for the sector (pie slice)
+// We'll draw a filled sector from center to outer radius (so daylight is a filled pie slice).
+function sectorPath(startFrac, endFrac, outerR) {
+  // normalize start/end to [0,24)
+  startFrac = (startFrac % 24 + 24) % 24;
+  endFrac = (endFrac % 24 + 24) % 24;
+
+  // We must handle wrap-around (e.g., sunset < sunrise)
+  // If end <= start, we will treat the sector as spanning across midnight: split into two arcs
+  const segments = [];
+  if (endFrac <= startFrac) {
+    segments.push([startFrac, 24]);
+    segments.push([0, endFrac]);
+  } else {
+    segments.push([startFrac, endFrac]);
+  }
+
+  // We'll create a combined path by union of segments (multiple pie slices)
+  const parts = [];
+
+  for (const seg of segments) {
+    const [s, e] = seg;
+    const sAng = hourToAngleRad(s);
+    const eAng = hourToAngleRad(e);
+
+    // start point on circle
+    const sx = outerR * Math.cos(sAng);
+    const sy = outerR * Math.sin(sAng);
+    const ex = outerR * Math.cos(eAng);
+    const ey = outerR * Math.sin(eAng);
+
+    // large arc flag: if arc spans > 180deg
+    const spanDeg = ((e - s) / 24) * 360;
+    const large = (spanDeg > 180) ? 1 : 0;
+
+    // path: move to center, line to start, arc to end, close
+    parts.push(`M 0 0 L ${sx.toFixed(4)} ${sy.toFixed(4)} A ${outerR} ${outerR} 0 ${large} 1 ${ex.toFixed(4)} ${ey.toFixed(4)} Z`);
+  }
+
+  return parts.join(' ');
+}
+
+// Determine whether an hour fraction sits within daylight sector (handles wrap)
+function isInDaylight(hourFrac, sunriseFrac, sunsetFrac) {
+  hourFrac = (hourFrac % 24 + 24) % 24;
+  sunriseFrac = (sunriseFrac % 24 + 24) % 24;
+  sunsetFrac = (sunsetFrac % 24 + 24) % 24;
+
+  if (sunriseFrac <= sunsetFrac) {
+    return hourFrac >= sunriseFrac && hourFrac < sunsetFrac;
+  } else {
+    // daylight wraps midnight (rare for this location, but handle)
+    return hourFrac >= sunriseFrac || hourFrac < sunsetFrac;
+  }
+}
+
+// Fetch sunrise/sunset from sunrise-sunset.org API (returns ISO utc strings)
+async function fetchSunTimes(lat, lon) {
+  const url = `https://api.sunrise-sunset.org/json?lat=${lat}&lng=${lon}&formatted=0`;
+  const res = await fetch(url);
+  const j = await res.json();
+  if (j.status !== 'OK') throw new Error('Sun API error');
+  return {
+    sunriseISO: j.results.sunrise,
+    sunsetISO:  j.results.sunset
+  };
+}
+
+// Rendering ------------------------------------------------------------------
+const numbersGroup = document.getElementById('numbersGroup');
+const dayGroup = document.getElementById('dayGroup');
+const handGroup = document.getElementById('handGroup');
+const clockSVG = document.getElementById('clockSVG');
+
+let sunriseFrac = 5.9; // defaults (will be replaced)
+let sunsetFrac  = 19.9;
+
+function renderNumbers() {
+  // Clear
+  while (numbersGroup.firstChild) numbersGroup.removeChild(numbersGroup.firstChild);
+
+  for (let h = 0; h < 24; h++) {
+    // angle for label
+    const ang = hourToAngleRad(h);
+    const x = NUM_RADIUS * Math.cos(ang);
+    const y = NUM_RADIUS * Math.sin(ang);
+
+    const text = createSVG('text', {
+      class: 'number',
+      x: x,
+      y: y
+    });
+    text.textContent = String(h);
+    // choose fill based on whether this label is on day or night
+    const inDay = isInDaylight(h + 0.0001, sunriseFrac, sunsetFrac); // tiny offset to classify
+    text.setAttribute('fill', inDay ? 'black' : 'white');
+    numbersGroup.appendChild(text);
+  }
+}
+
+function renderDaySector() {
+  // Clear
+  while (dayGroup.firstChild) dayGroup.removeChild(dayGroup.firstChild);
+
+  // Create path for daylight sector (outerR = R)
+  const pathD = sectorPath(sunriseFrac, sunsetFrac, R);
+
+  const p = createSVG('path', {
+    d: pathD,
+    fill: 'white'
+  });
+  dayGroup.appendChild(p);
+
+  // Put a slightly smaller black circle on top to create a ring look (to keep center dark)
+  // But we want the center to match underlying night/day? In current spec, center follows arc.
+  // To keep the inner region consistent and emphasize ring, draw an inner black circle
+  const inner = createSVG('circle', { r: (R - 60).toString(), fill: 'black' });
+  dayGroup.appendChild(inner);
+}
+
+function updateHandAndColors() {
+  const now = new Date();
+
+  // Obtain the current time as fractional hours in America/Los_Angeles
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIMEZONE,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).formatToParts(now);
+
+  let hh=0, mm=0, ss=0;
+  for (const p of parts) {
+    if (p.type==='hour') hh = parseInt(p.value,10);
+    if (p.type==='minute') mm = parseInt(p.value,10);
+    if (p.type==='second') ss = parseInt(p.value,10);
+  }
+  const frac = hh + mm/60 + ss/3600;
+
+  // rotate hand: rotation = frac/24*360 + 90deg (so 0 -> bottom)
+  const deg = (frac/24)*360 + 90;
+  handGroup.setAttribute('transform', `rotate(${deg})`);
+
+  // Determine whether current time is in daylight to set overall page color variables
+  const nowIsDay = isInDaylight(frac, sunriseFrac, sunsetFrac);
+
+  // We'll set CSS color variables by toggling document color (currentColor used by strokes)
+  // If it's day at the current *entire clock*, we don't want to invert entire page — instead
+  // since we drew daylight as a white sector on top of a black disc, we keep the page background black
+  // and rely on element 'currentColor' for strokes. We'll set 'currentColor' to the contrasting
+  // color for the hand/outer rim based on where the hand endpoint sits (hand tip position).
+  // Simpler: if hand's location is on daylight, use black hand (since daylight is white). Else white.
+  const handOnDay = isInDaylight(frac, sunriseFrac, sunsetFrac);
+
+  // Set currentColor by manipulating a style on the rim/hand/center via document element color
+  // We'll set the <g id="clockGroup"> parent's color by applying a style attribute.
+  const clockGroup = document.getElementById('clockGroup');
+  clockGroup.style.color = handOnDay ? 'black' : 'white';
+}
+
+// Init & daily refresh -------------------------------------------------------
+async function initialize() {
+  try {
+    const sun = await fetchSunTimes(LAT, LON);
+    sunriseFrac = fractionalHourInTZ(sun.sunriseISO, TIMEZONE);
+    sunsetFrac  = fractionalHourInTZ(sun.sunsetISO,  TIMEZONE);
+  } catch (e) {
+    console.error('Sun fetch failed, using defaults:', e);
+    // keep defaults
+  }
+
+  renderDaySector();
+  renderNumbers();
+  updateHandAndColors();
+
+  // Update every second for hand movement
+  setInterval(() => {
+    updateHandAndColors();
+  }, 1000);
+
+  // Recompute sunrise/sunset at midnight local time (and re-render numbers/day sector)
+  scheduleDailySunUpdate();
+}
+
+// Schedule an update at the next local midnight in America/Los_Angeles
+function scheduleDailySunUpdate() {
+  // compute ms until next local midnight in TIMEZONE
+  const now = new Date();
+  // get current date components in the target timezone via formatToParts for year/month/day
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(now);
+  let year=now.getFullYear(), month=now.getMonth()+1, day=now.getDate();
+  for (const p of parts) {
+    if (p.type==='year') year = parseInt(p.value,10);
+    if (p.type==='month') month = parseInt(p.value,10);
+    if (p.type==='day') day = parseInt(p.value,10);
+  }
+  // create a Date object representing next day at 00:05 in that timezone by building a locale string
+  // We'll find the next midnight by incrementing day and constructing an ISO via Date.UTC for the tz offset.
+  // Simpler approach: compute local midnight in user's local time that corresponds to target tz midnight:
+  // Build a string "YYYY-MM-DDT00:05:00" and interpret it in the target timezone by using Date.toLocaleString with tz
+  // The following approach constructs a Date for the next midnight by using the timezone offset calculation.
+
+  // Build a Date object for the target timezone midnight by parsing a string in that timezone.
+  const nextDay = new Date(Date.UTC(year, month-1, day, 0, 5)); // this is 00:05 UTC => not right
+  // Simpler and robust: just set a timer for 30 minutes, and at each call check if the local date (in TZ) changed.
+  // That avoids timezone complexities for scheduling.
+
+  let lastLocalDate = null;
+  function pollForDateChange() {
+    const now = new Date();
+    // get local date in TIMEZONE
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year:'numeric', month:'2-digit', day:'2-digit' }).formatToParts(now);
+    let y=now.getFullYear(), m=now.getMonth()+1, d=now.getDate();
+    for (const p of parts) {
+      if (p.type==='year') y = parseInt(p.value,10);
+      if (p.type==='month') m = parseInt(p.value,10);
+      if (p.type==='day') d = parseInt(p.value,10);
     }
-
-    function updateClock(sunrise, sunset) {
-      const now = new Date();
-      const isDay = now >= sunrise && now < sunset;
-
-      document.body.style.backgroundColor = isDay ? 'white' : 'black';
-      document.querySelector('.clock').style.color = isDay ? 'black' : 'white';
-
-      const hours = now.getHours() % 12;
-      const minutes = now.getMinutes();
-      const seconds = now.getSeconds();
-
-      const hourDeg = (hours + minutes / 60) * 30;
-      const minuteDeg = (minutes + seconds / 60) * 6;
-
-      document.getElementById('hour-hand').style.transform =
-        `translateX(-50%) rotate(${hourDeg}deg)`;
-      document.getElementById('minute-hand').style.transform =
-        `translateX(-50%) rotate(${minuteDeg}deg)`;
+    const localDateKey = `${y}-${m}-${d}`;
+    if (!lastLocalDate) lastLocalDate = localDateKey;
+    if (localDateKey !== lastLocalDate) {
+      // date changed in target tz -> refresh sunrise/sunset
+      lastLocalDate = localDateKey;
+      refreshSunTimes();
     }
+  }
 
-    function createNumbers() {
-      const container = document.getElementById('numbers');
-      const radius = 42; // percent distance from center
-      for (let i = 1; i <= 12; i++) {
-        const div = document.createElement('div');
-        div.className = 'number';
-        const angle = (i / 12) * 2 * Math.PI;
-        div.style.left = `${50 + radius * Math.sin(angle)}%`;
-        div.style.top = `${50 - radius * Math.cos(angle)}%`;
-        div.textContent = i;
-        container.appendChild(div);
-      }
-    }
+  // poll every 30 seconds - lightweight and reliable
+  setInterval(pollForDateChange, 30000);
+}
 
-    async function init() {
-      createNumbers();
-      const { sunrise, sunset } = await getSunTimes();
-      setInterval(() => updateClock(sunrise, sunset), 1000);
-    }
+async function refreshSunTimes() {
+  try {
+    const sun = await fetchSunTimes(LAT, LON);
+    sunriseFrac = fractionalHourInTZ(sun.sunriseISO, TIMEZONE);
+    sunsetFrac  = fractionalHourInTZ(sun.sunsetISO,  TIMEZONE);
+    renderDaySector();
+    renderNumbers();
+  } catch (e) {
+    console.error('refresh sun failed', e);
+  }
+}
 
-    init();
-  </script>
+// Kick off
+initialize();
+
+</script>
 </body>
 </html>
-
