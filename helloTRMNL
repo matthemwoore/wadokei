@@ -1,11 +1,6 @@
-Unknown property ‘-moz-osx-font-smoothing’.  Declaration dropped. wadokei:11:31
-Elements matching selector: html, body
-NodeList [ html, body
-]
-​
-0: <html lang="en">​
-1: <body>
-​
-length: 2
-​
-<prototype>: NodeListPrototype { item: item(), keys: keys(), values: values(), … }
+<!DOCTYPE html>
+<html>
+  <body style="background:black;color:white;font-size:3em;text-align:center;">
+    Hello TRMNL
+  </body>
+</html>
