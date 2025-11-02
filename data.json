@@ -1,5 +1,5 @@
 {
-  "hour": 7,
-  "minute": 28,
-  "is_daylight": true
+  "sunrise": "2025-11-01T13:55:00Z",
+  "sunset": "2025-11-02T02:58:00Z",
+  "now": "2025-11-02T02:28:00Z"
 }
